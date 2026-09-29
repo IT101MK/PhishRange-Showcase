@@ -1,0 +1,1095 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhishRange</title>
+<meta name="description" content="PhishRange: local phishing and malware triage for Claude Code. It parses a suspicious email, detonates attachments in throwaway VirtualBox sandboxes, runs six analysis agents in parallel and writes a case report.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --paper: #F3F5F8;
+    --surface: #FFFFFF;
+    --sunk: #E9EDF2;
+    --ink: #14213D;
+    --ink-2: #4B5873;
+    --ink-3: #7A869C;
+    --line: #D6DDE6;
+    --iso: #2E6DB4;
+    --iso-soft: rgba(46,109,180,.10);
+    --mon: #B96A00;
+    --mon-soft: rgba(201,122,10,.12);
+    --ai: #6C47B8;
+    --ai-soft: rgba(108,71,184,.10);
+    --bad: #B3261E;
+    --bad-soft: rgba(179,38,30,.10);
+    --warn: #A15C00;
+    --ok: #2B7A4B;
+    --ok-soft: rgba(43,122,75,.10);
+    --code-bg: #14213D;
+    --code-ink: #E3E9F4;
+    --code-dim: #8FA0C0;
+    --radius-lg: 14px;
+    --radius-sm: 6px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0D1422;
+      --surface: #141D30;
+      --sunk: #1A253B;
+      --ink: #E6EBF4;
+      --ink-2: #A3B0C7;
+      --ink-3: #74829C;
+      --line: #27334B;
+      --iso: #72A9EA;
+      --iso-soft: rgba(114,169,234,.14);
+      --mon: #F2A93B;
+      --mon-soft: rgba(242,169,59,.14);
+      --ai: #B195F2;
+      --ai-soft: rgba(177,149,242,.14);
+      --bad: #F2786D;
+      --bad-soft: rgba(242,120,109,.14);
+      --warn: #F2A93B;
+      --ok: #62C58E;
+      --ok-soft: rgba(98,197,142,.14);
+      --code-bg: #0A101C;
+      --code-ink: #DCE4F2;
+      --code-dim: #7A8AA8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0D1422; --surface: #141D30; --sunk: #1A253B; --ink: #E6EBF4; --ink-2: #A3B0C7; --ink-3: #74829C;
+    --line: #27334B; --iso: #72A9EA; --iso-soft: rgba(114,169,234,.14); --mon: #F2A93B; --mon-soft: rgba(242,169,59,.14);
+    --ai: #B195F2; --ai-soft: rgba(177,149,242,.14); --bad: #F2786D; --bad-soft: rgba(242,120,109,.14); --warn: #F2A93B;
+    --ok: #62C58E; --ok-soft: rgba(98,197,142,.14); --code-bg: #0A101C; --code-ink: #DCE4F2; --code-dim: #7A8AA8;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Archivo", system-ui, "Segoe UI", sans-serif;
+    font-size: 16.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; }
+  code { font-size: .86em; background: var(--sunk); border-radius: 4px; padding: .08em .38em; overflow-wrap: anywhere; }
+  a { color: var(--iso); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  a:hover { text-decoration-thickness: 2px; }
+  :focus-visible { outline: 2px solid var(--iso); outline-offset: 3px; border-radius: 3px; }
+  h1, h2, h3 { font-stretch: 112%; line-height: 1.12; margin: 0; letter-spacing: -.012em; text-wrap: balance; }
+  h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 750; }
+  h3 { font-size: 19px; font-weight: 700; }
+  p { margin: 0 0 1em; max-width: 68ch; }
+  .wrap { max-width: 1160px; margin-inline: auto; padding-inline: 16px; }
+  @media (min-width: 700px) { .wrap { padding-inline: 32px; } }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar .wrap { display: flex; align-items: center; gap: 20px; height: 56px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-stretch: 118%; font-size: 17px; color: var(--ink); text-decoration: none; flex: none; }
+  .brand svg { width: 22px; height: 22px; }
+  .topnav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
+  .topnav::-webkit-scrollbar { display: none; }
+  .topnav a { color: var(--ink-2); text-decoration: none; font-size: 14px; padding: 6px 10px; border-radius: var(--radius-sm); white-space: nowrap; }
+  .topnav a:hover { background: var(--sunk); color: var(--ink); }
+  .topnav a.active { color: var(--ink); background: var(--sunk); font-weight: 600; }
+  .gh { flex: none; display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; color: var(--ink); text-decoration: none; border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; background: var(--surface); }
+  .gh:hover { border-color: var(--ink-3); }
+  .gh svg { width: 16px; height: 16px; }
+  @media (max-width: 620px) { .gh span { display: none; } .gh { padding: 7px; } }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 56px 0 32px; }
+  .hero-grid { display: grid; gap: 28px; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 980px) { .hero-grid { grid-template-columns: minmax(0, 5fr) minmax(0, 4fr); align-items: start; gap: 48px; } }
+  .hero h1 { max-width: 15ch; font-size: clamp(38px, 6.2vw, 72px); font-weight: 800; font-stretch: 120%; letter-spacing: -.03em; line-height: .98; }
+  .hero h1 .strike { color: var(--ink-3); }
+  .lede { font-size: 19px; color: var(--ink-2); margin-top: 22px; max-width: 56ch; }
+  .facts { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; }
+  .facts div { background: var(--surface); padding: 16px 18px; }
+  .facts b { display: block; font-size: 30px; font-stretch: 115%; font-weight: 800; line-height: 1.1; }
+  .facts span { font-size: 14px; color: var(--ink-2); }
+  .status-line { margin-top: 18px; display: flex; gap: 10px; align-items: flex-start; font-size: 14.5px; color: var(--ink-2); }
+  .status-line .pip { flex: none; margin-top: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px var(--ok-soft); }
+
+  /* ---------- replay panel ---------- */
+  .replay { margin-top: 40px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; }
+  .replay-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .replay-head h3 { font-size: 16px; }
+  .replay-head p { margin: 2px 0 0; font-size: 14px; color: var(--ink-2); }
+  .btn { font: inherit; font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); cursor: pointer; }
+  .btn:hover { opacity: .9; }
+  .btn svg { width: 14px; height: 14px; }
+  .scroll-x { overflow-x: auto; }
+  .replay svg.pipe { display: block; width: 100%; min-width: 780px; height: auto; }
+  .console { border-top: 1px solid var(--line); background: var(--code-bg); color: var(--code-ink); font-family: "JetBrains Mono", monospace; font-size: 13px; padding: 12px 18px; min-height: 108px; line-height: 1.65; }
+  .console .ln { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .console .ln.dim { color: var(--code-dim); }
+  .console .ln .p { color: var(--code-dim); }
+
+  /* shared svg classes */
+  .n-box { fill: var(--surface); stroke: var(--line); stroke-width: 1.4; transition: fill .35s, stroke .35s; }
+  .n-t { font: 600 13px "Archivo", sans-serif; font-stretch: 110%; fill: var(--ink); }
+  .n-s { font: 400 10.5px "JetBrains Mono", monospace; fill: var(--ink-2); }
+  .n-edge { fill: none; stroke: var(--line); stroke-width: 1.6; transition: stroke .35s; }
+  .n-lbl { font: 400 10px "JetBrains Mono", monospace; fill: var(--ink-3); }
+  .n-group { fill: none; stroke: var(--line); stroke-dasharray: 3 5; }
+  .n-glbl { font: 600 11px "Archivo", sans-serif; fill: var(--ink-3); }
+  .n-score { font: 700 13px "JetBrains Mono", monospace; fill: var(--ink-3); transition: fill .35s; }
+  .n-scorebg { fill: var(--sunk); transition: fill .35s; }
+  .pipe .node.lit .n-box { stroke: var(--ink); fill: var(--sunk); }
+  .pipe .node.iso.lit .n-box { stroke: var(--iso); fill: var(--iso-soft); }
+  .pipe .node.mon.lit .n-box { stroke: var(--mon); fill: var(--mon-soft); }
+  .pipe .node.ai.lit .n-box { stroke: var(--ai); fill: var(--ai-soft); }
+  .pipe .node.ai .n-t { font-size: 12.5px; }
+  .pipe .node.ai.lit .n-score { fill: var(--ink); }
+  .pipe .node.verdict.lit .n-box { stroke: var(--bad); fill: var(--bad-soft); }
+  .pipe .node.verdict .n-t { fill: var(--bad); }
+  .pipe .node.verdict { opacity: .25; transition: opacity .4s; }
+  .pipe .node.verdict.lit { opacity: 1; }
+  .pipe .n-edge.lit { stroke: var(--ink-2); stroke-dasharray: 6 5; animation: flow .9s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset: -22; } }
+  @media (prefers-reduced-motion: reduce) { .pipe .n-edge.lit { animation: none; stroke-dasharray: none; } }
+
+  /* ---------- sections ---------- */
+  section.block { padding: 72px 0 8px; scroll-margin-top: 64px; }
+  .sec-head { display: grid; gap: 14px; margin-bottom: 30px; }
+  @media (min-width: 900px) { .sec-head { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 48px; align-items: end; } }
+  .sec-head p { color: var(--ink-2); margin: 0; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 22px; }
+  @media (max-width: 560px) { .panel { padding: 16px; } }
+  .caption { font-size: 14px; color: var(--ink-2); margin-top: 14px; max-width: 80ch; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13.5px; color: var(--ink-2); margin-bottom: 16px; }
+  .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
+
+  /* ---------- swimlane ---------- */
+  .lanes { display: grid; grid-template-columns: 150px repeat(6, minmax(120px, 1fr)); min-width: 920px; }
+  .lanes .col-h { padding: 0 8px 12px; font-size: 13px; color: var(--ink-3); font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+  .lanes .col-h .num { font-family: "JetBrains Mono", monospace; color: var(--ink); font-weight: 600; }
+  .lanes .lane-h { padding: 14px 12px; font-weight: 700; font-size: 14px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+  .lanes .lane-h small { font-weight: 400; color: var(--ink-2); font-size: 12.5px; }
+  .lanes .cell { border-top: 1px solid var(--line); padding: 10px 6px; }
+  .chip { border-radius: 8px; padding: 9px 10px; font-size: 13px; line-height: 1.4; height: 100%; }
+  .chip b { display: block; font-family: "JetBrains Mono", monospace; font-size: 11.5px; font-weight: 600; margin-bottom: 3px; overflow-wrap: anywhere; }
+  .chip.det { background: var(--sunk); border-left: 3px solid var(--ink-2); }
+  .chip.ai { background: var(--ai-soft); border-left: 3px solid var(--ai); }
+  .chip.you { background: transparent; border: 1px dashed var(--ink-3); }
+
+  /* ---------- containment ---------- */
+  .two { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 980px) { .two { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } }
+  svg.net { display: block; width: 100%; min-width: 620px; height: auto; }
+  .net .n-t { font-size: 15px; }
+  .net .n-s { font-size: 12.5px; }
+  .net .n-lbl { font-size: 12px; }
+  .net .host { fill: var(--paper); stroke: var(--ink-3); stroke-width: 1.3; }
+  .net .vm-iso { fill: var(--iso-soft); stroke: var(--iso); stroke-width: 1.8; }
+  .net .vm-mon { fill: var(--mon-soft); stroke: var(--mon); stroke-width: 1.8; }
+  .net .plain { fill: var(--surface); stroke: var(--line); stroke-width: 1.4; }
+  .net .gc { stroke: var(--ink-2); stroke-width: 1.4; stroke-dasharray: 2 4; fill: none; }
+  .net .egress { stroke: var(--mon); stroke-width: 2; fill: none; }
+  .net .blocked { stroke: var(--bad); stroke-width: 1.6; stroke-dasharray: 5 4; fill: none; }
+  .net .x { stroke: var(--bad); stroke-width: 2.4; stroke-linecap: round; }
+  .net .bad-t { font: 600 11px "Archivo", sans-serif; fill: var(--bad); }
+  .net .ah { fill: var(--mon); }
+  .net .ah2 { fill: var(--ink-2); }
+  .profile { border-radius: var(--radius-lg); padding: 18px 20px; border: 1px solid var(--line); background: var(--surface); }
+  .profile + .profile { margin-top: 14px; }
+  .profile h3 { display: flex; align-items: center; gap: 10px; }
+  .profile h3 i { width: 12px; height: 12px; border-radius: 3px; }
+  .profile.iso h3 i { background: var(--iso); }
+  .profile.mon h3 i { background: var(--mon); }
+  .profile dl { margin: 12px 0 0; display: grid; grid-template-columns: 88px minmax(0,1fr); gap: 6px 12px; font-size: 14px; }
+  .profile dt { color: var(--ink-3); }
+  .profile dd { margin: 0; }
+
+  /* ---------- timeline ---------- */
+  .tl { min-width: 720px; }
+  .tl-row { display: grid; grid-template-columns: 110px minmax(0,1fr); align-items: center; gap: 12px; margin-bottom: 10px; }
+  .tl-row .who { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .tl-row .who i { width: 10px; height: 10px; border-radius: 3px; }
+  .tl-track { position: relative; height: 46px; background: var(--sunk); border-radius: 8px; }
+  .seg { position: absolute; top: 6px; bottom: 6px; border-radius: 5px; display: flex; align-items: center; padding: 0 8px; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+  .seg.clone { background: var(--ink-3); color: var(--surface); }
+  .seg.boot { background: repeating-linear-gradient(135deg, var(--line) 0 6px, transparent 6px 12px); color: var(--ink-2); border: 1px solid var(--line); }
+  .seg.run { color: #fff; }
+  .iso-row .seg.run { background: var(--iso); }
+  .mon-row .seg.run { background: var(--mon); }
+  :root[data-theme="dark"] .seg.run, :root[data-theme="dark"] .seg.clone { color: #0D1422; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .seg.run, :root:not([data-theme="light"]) .seg.clone { color: #0D1422; } }
+  .seg.end { background: var(--ink); color: var(--paper); }
+  .ticks { position: absolute; inset: 0; pointer-events: none; }
+  .ticks span { position: absolute; bottom: 2px; width: 2px; height: 8px; background: currentColor; opacity: .55; border-radius: 1px; }
+  .ceiling { position: absolute; top: -6px; bottom: -6px; border-left: 2px dashed var(--bad); }
+  .tl-axis { display: grid; grid-template-columns: 110px minmax(0,1fr); gap: 12px; }
+  .tl-axis .scale { position: relative; height: 22px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-3); }
+  .tl-axis .scale span { position: absolute; transform: translateX(-50%); top: 4px; }
+  .tl-notes { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); margin-top: 18px; }
+  .tl-notes div { font-size: 13.5px; color: var(--ink-2); border-top: 2px solid var(--line); padding-top: 8px; }
+  .tl-notes b { color: var(--ink); display: block; font-size: 14px; }
+
+  /* ---------- agents ---------- */
+  .agents { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
+  .agent { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; }
+  .agent.det-iso { border-top: 3px solid var(--iso); }
+  .agent.det-mon { border-top: 3px solid var(--mon); }
+  .agent.content { border-top: 3px solid var(--ai); }
+  .agent h3 { font-family: "JetBrains Mono", monospace; font-size: 14.5px; font-stretch: 100%; letter-spacing: 0; }
+  .agent p { margin: 0; font-size: 14.5px; }
+  .io { display: grid; grid-template-columns: 44px minmax(0,1fr); gap: 4px 10px; font-size: 13px; color: var(--ink-2); }
+  .io span:nth-child(odd) { color: var(--ink-3); }
+  .io code { font-size: 12px; }
+  .note { font-size: 13px; color: var(--ink-3); }
+
+  /* ---------- severity calculator ---------- */
+  .calc { display: grid; gap: 28px; grid-template-columns: minmax(0,1fr); }
+  @media (min-width: 900px) { .calc { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; } }
+  .slider { display: grid; grid-template-columns: minmax(0,1fr) 36px; gap: 2px 12px; align-items: center; margin-bottom: 12px; }
+  .slider label { font-family: "JetBrains Mono", monospace; font-size: 13px; grid-column: 1 / -1; display: flex; justify-content: space-between; }
+  .slider label .is-max { color: var(--bad); font-family: "Archivo", sans-serif; font-weight: 700; font-size: 12.5px; visibility: hidden; }
+  .slider.max label .is-max { visibility: visible; }
+  .slider input { width: 100%; accent-color: var(--ai); }
+  .slider.max input { accent-color: var(--bad); }
+  .slider output { font-family: "JetBrains Mono", monospace; font-weight: 600; text-align: right; }
+  .sev-num { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .sev-num b { font-size: 84px; line-height: 1; font-stretch: 120%; font-weight: 800; letter-spacing: -.04em; }
+  .sev-num .of { font-size: 20px; color: var(--ink-3); font-weight: 600; }
+  .verdict-tag { font-family: "JetBrains Mono", monospace; font-size: 15px; font-weight: 600; padding: 5px 12px; border-radius: 999px; }
+  .v-benign { background: var(--ok-soft); color: var(--ok); }
+  .v-flagged { background: var(--iso-soft); color: var(--iso); }
+  .v-suspicious { background: var(--mon-soft); color: var(--warn); }
+  .v-malicious { background: var(--bad-soft); color: var(--bad); }
+  .scale-bar { position: relative; margin: 26px 0 8px; }
+  .scale-bar .bands { display: grid; grid-template-columns: 2fr 3fr 3fr 3fr; height: 14px; border-radius: 7px; overflow: hidden; }
+  .scale-bar .bands span:nth-child(1) { background: var(--ok); }
+  .scale-bar .bands span:nth-child(2) { background: var(--iso); }
+  .scale-bar .bands span:nth-child(3) { background: var(--mon); }
+  .scale-bar .bands span:nth-child(4) { background: var(--bad); }
+  .scale-bar .marker { position: absolute; top: -9px; width: 4px; height: 32px; background: var(--ink); border-radius: 2px; transform: translateX(-50%); transition: left .25s ease; box-shadow: 0 0 0 2px var(--surface); }
+  .scale-labels { display: grid; grid-template-columns: 2fr 3fr 3fr 3fr; font-size: 12px; color: var(--ink-2); gap: 4px; }
+  .scale-labels span { overflow-wrap: anywhere; }
+  .scale-labels b { display: block; font-family: "JetBrains Mono", monospace; color: var(--ink); font-size: 11.5px; }
+  .actions { margin: 20px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .actions li { font-size: 14.5px; padding: 10px 12px; background: var(--sunk); border-radius: 8px; }
+  .actions-h { margin-top: 24px; font-size: 15px; }
+
+  /* ---------- file map ---------- */
+  .fmap { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 700px; }
+  .fmap th { text-align: left; font-weight: 600; color: var(--ink-3); font-size: 13px; padding: 0 12px 10px; border-bottom: 1px solid var(--line); }
+  .fmap td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .fmap td:first-child { font-family: "JetBrains Mono", monospace; font-size: 13px; white-space: nowrap; }
+  .fmap .ind { color: var(--ink-3); }
+  .fmap tr.group td { background: var(--sunk); font-weight: 600; font-family: "Archivo", sans-serif; font-size: 13px; color: var(--ink-2); }
+  .tag { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; margin: 1px 4px 1px 0; white-space: nowrap; }
+  .tag.s { background: var(--sunk); color: var(--ink); border: 1px solid var(--line); }
+  .tag.a { background: var(--ai-soft); color: var(--ai); }
+  .tag.i { background: var(--iso-soft); color: var(--iso); }
+  .tag.m { background: var(--mon-soft); color: var(--warn); }
+  .tag.y { border: 1px dashed var(--ink-3); color: var(--ink-2); }
+
+  /* ---------- setup ---------- */
+  .setup { display: grid; gap: 20px; grid-template-columns: minmax(0,1fr); }
+  @media (min-width: 900px) { .setup { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 40px; } }
+  .prereq { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .prereq li { display: grid; grid-template-columns: 22px minmax(0,1fr); gap: 10px; font-size: 15px; }
+  .prereq li svg { width: 18px; height: 18px; margin-top: 3px; color: var(--ok); }
+  .prereq li.opt svg { color: var(--ink-3); }
+  .prereq small { display: block; color: var(--ink-2); font-size: 13.5px; }
+  ol.steps { list-style: none; margin: 0; padding: 0; counter-reset: s; }
+  ol.steps > li { counter-increment: s; position: relative; padding: 0 0 26px 52px; }
+  ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: -2px; width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid var(--ink); display: grid; place-items: center; font-weight: 700; font-family: "JetBrains Mono", monospace; font-size: 14px; background: var(--paper); z-index: 1; }
+  ol.steps > li:not(:last-child)::after { content: ""; position: absolute; left: 16.5px; top: 34px; bottom: 0; width: 1.5px; background: var(--line); }
+  ol.steps h3 { font-size: 17px; margin-bottom: 6px; }
+  ol.steps p { font-size: 15px; color: var(--ink-2); margin-bottom: 8px; }
+  .code { position: relative; background: var(--code-bg); color: var(--code-ink); border-radius: 8px; padding: 12px 56px 12px 14px; font-size: 13.5px; overflow-x: auto; margin: 0 0 6px; }
+  .code .c { color: var(--code-dim); }
+  .copy { position: absolute; top: 7px; right: 7px; font: 600 12px "Archivo", sans-serif; background: transparent; color: var(--code-dim); border: 1px solid #3A4866; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+  .copy:hover { color: var(--code-ink); border-color: var(--code-dim); }
+
+  /* ---------- tests ---------- */
+  .bars { display: grid; gap: 8px; }
+  .bar { display: grid; grid-template-columns: minmax(130px, 200px) minmax(0,1fr); gap: 12px; align-items: center; font-size: 14px; }
+  .bar .name { font-family: "JetBrains Mono", monospace; font-size: 12.5px; overflow-wrap: anywhere; }
+  .bar .track { display: flex; align-items: center; gap: 8px; }
+  .bar .fill { height: 18px; background: var(--ink-2); border-radius: 0 4px 4px 0; }
+  .bar .v { font-weight: 700; font-size: 13px; }
+  .bar .what { grid-column: 2; font-size: 13px; color: var(--ink-2); margin-top: -4px; }
+
+  /* ---------- limitations ---------- */
+  .limits { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  @media (max-width: 400px) { .limits { grid-template-columns: minmax(0,1fr); } }
+  .limit { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .limit .kind { font-size: 12.5px; font-weight: 600; color: var(--warn); }
+  .limit .kind.design { color: var(--ink-3); }
+  .limit h3 { font-size: 16px; margin: 4px 0 8px; font-stretch: 105%; }
+  .limit p { font-size: 14px; color: var(--ink-2); margin: 0; }
+
+  .safety { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .safety div { border-left: 3px solid var(--ok); padding: 2px 0 2px 14px; }
+  .safety b { display: block; margin-bottom: 4px; }
+  .safety p { font-size: 14.5px; color: var(--ink-2); margin: 0; }
+
+  .docs { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .docs a { display: block; text-decoration: none; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .docs a:hover { border-color: var(--iso); }
+  .docs b { display: block; font-size: 15px; }
+  .docs span { display: block; font-size: 13.5px; color: var(--ink-2); margin-top: 3px; }
+  .docs code { display: inline-block; margin-top: 8px; font-size: 11.5px; background: none; padding: 0; color: var(--iso); }
+
+  footer { margin-top: 80px; border-top: 1px solid var(--line); padding: 26px 0 40px; font-size: 14px; color: var(--ink-2); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="PhishRange home">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 7l9 6 9-6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="19" cy="17" r="4.5" fill="var(--bad)"/></svg>
+      PhishRange
+    </a>
+    <nav class="topnav" id="topnav" aria-label="Sections">
+      <a href="#pipeline">Pipeline</a>
+      <a href="#sandbox">Sandbox</a>
+      <a href="#agents">Agents</a>
+      <a href="#scoring">Scoring</a>
+      <a href="#output">Output</a>
+      <a href="#setup">Setup</a>
+      <a href="#tests">Tests</a>
+      <a href="#limits">Limitations</a>
+    </nav>
+    <a class="gh" href="https://github.com/IT101MK/Project-PhishRange" aria-label="View the repository on GitHub">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      <span>View on GitHub</span>
+    </a>
+  </div>
+</header>
+
+<main id="top">
+  <!-- ===================== HERO ===================== -->
+  <section class="hero">
+    <div class="wrap">
+      <h1>Open the suspicious email. <span class="strike">Just not on your own machine.</span></h1>
+      <div class="hero-grid">
+        <div>
+          <p class="lede">PhishRange is a Claude Code tool that triages phishing and malware on a single Windows PC. It parses the email, runs any attachment inside two throwaway VirtualBox sandboxes, has six specialist agents read the evidence in parallel, and hands you a plain-English verdict with the actions to take.</p>
+          <p class="lede" style="margin-top:0">Think of it as a one-person SOC for a family inbox: no malware lab, no cloud sandbox subscription, and nothing leaves the PC except optional reputation lookups.</p>
+        </div>
+        <div>
+          <div class="facts">
+            <div><b>1</b><span>command, <code>/phish-scan</code></span></div>
+            <div><b>2</b><span>sandbox clones per attachment, run in parallel</span></div>
+            <div><b>6</b><span>analysis agents, dispatched together</span></div>
+            <div><b>0</b><span>actions taken automatically</span></div>
+          </div>
+          <div class="status-line"><span class="pip" aria-hidden="true"></span><span>Working end-to-end. Golden VM built and snapshotted, full pipeline run against a benign fixture, 52 of 52 tests passing.</span></div>
+        </div>
+      </div>
+
+      <div class="replay" aria-labelledby="replay-title">
+        <div class="replay-head">
+          <div>
+            <h3 id="replay-title">Watch a case run</h3>
+            <p>An illustrative case with a macro-laden attachment, from paste to verdict. Scores are example values.</p>
+          </div>
+          <button class="btn" id="replay-btn" type="button">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 2a6 6 0 105.66 8h-2.2A4 4 0 118 4c1.1 0 2.1.45 2.83 1.17L8.5 7.5H14V2l-1.76 1.76A5.98 5.98 0 008 2z"/></svg>
+            Replay
+          </button>
+        </div>
+        <div class="scroll-x">
+          <svg class="pipe" viewBox="0 0 1000 380" role="img" aria-label="Animated pipeline: an email goes to intake, which fans out to an isolated sandbox, a monitored sandbox and reputation enrichment. All three write into the case folder. Six agents read the folder and each produce a risk score. synthesize.py takes the highest score as severity and turns it into a verdict.">
+            <defs>
+              <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10z" fill="var(--ink-3)"/></marker>
+            </defs>
+            <rect class="n-group" x="300" y="14" width="188" height="352" rx="12"/>
+            <text class="n-glbl" x="394" y="32" text-anchor="middle">Gathered in parallel</text>
+            <rect class="n-group" x="580" y="14" width="222" height="352" rx="12"/>
+            <text class="n-glbl" x="691" y="32" text-anchor="middle">Read in parallel</text>
+
+            <!-- edges -->
+            <path class="n-edge" data-step="1" d="M128,190 L150,190" marker-end="url(#ah)"/>
+            <path class="n-edge" data-step="2" d="M270,190 C292,190 292,85 314,85" marker-end="url(#ah)"/>
+            <path class="n-edge" data-step="2" d="M270,190 L314,190" marker-end="url(#ah)"/>
+            <path class="n-edge" data-step="2" d="M270,190 C292,190 292,295 314,295" marker-end="url(#ah)"/>
+            <path class="n-edge" data-step="3" d="M474,85 L508,85" marker-end="url(#ah)"/>
+            <path class="n-edge" data-step="3" d="M474,190 L508,190" marker-end="url(#ah)"/>
+            <path class="n-edge" data-step="3" d="M474,295 L508,295" marker-end="url(#ah)"/>
+            <path class="n-edge" data-step="4" d="M552,66 L590,66 M552,120 L590,120 M552,174 L590,174 M552,228 L590,228 M552,282 L590,282 M552,336 L590,336"/>
+            <path class="n-edge" data-step="5" d="M792,66 C808,66 808,180 820,180 M792,120 C808,120 808,184 820,184 M792,174 L820,188 M792,228 L820,192 M792,282 C808,282 808,196 820,196 M792,336 C808,336 808,200 820,200"/>
+            <path class="n-edge" data-step="6" d="M905,232 L905,262" marker-end="url(#ah)"/>
+
+            <!-- email -->
+            <g class="node" data-step="0">
+              <rect class="n-box" x="12" y="160" width="116" height="60" rx="10"/>
+              <text class="n-t" x="70" y="186" text-anchor="middle">Email</text>
+              <text class="n-s" x="70" y="204" text-anchor="middle">invoice_0923.docm</text>
+            </g>
+            <!-- intake -->
+            <g class="node" data-step="1">
+              <rect class="n-box" x="152" y="160" width="118" height="60" rx="10"/>
+              <text class="n-t" x="211" y="186" text-anchor="middle">Intake</text>
+              <text class="n-s" x="211" y="204" text-anchor="middle">parse, hash, file</text>
+            </g>
+            <!-- evidence -->
+            <g class="node iso" data-step="2">
+              <rect class="n-box" x="316" y="54" width="158" height="62" rx="10"/>
+              <text class="n-t" x="395" y="80" text-anchor="middle">Isolated sandbox</text>
+              <text class="n-s" x="395" y="99" text-anchor="middle">no network card</text>
+            </g>
+            <g class="node mon" data-step="2">
+              <rect class="n-box" x="316" y="159" width="158" height="62" rx="10"/>
+              <text class="n-t" x="395" y="185" text-anchor="middle">Monitored sandbox</text>
+              <text class="n-s" x="395" y="204" text-anchor="middle">outbound-only NAT</text>
+            </g>
+            <g class="node" data-step="2">
+              <rect class="n-box" x="316" y="264" width="158" height="62" rx="10"/>
+              <text class="n-t" x="395" y="290" text-anchor="middle">Enrichment</text>
+              <text class="n-s" x="395" y="309" text-anchor="middle">VT, urlscan, AbuseIPDB</text>
+            </g>
+            <!-- case folder -->
+            <g class="node" data-step="3">
+              <rect class="n-box" x="510" y="44" width="42" height="312" rx="10"/>
+              <text class="n-t" x="531" y="200" text-anchor="middle" transform="rotate(-90 531 200)">cases/&lt;case_id&gt;/</text>
+            </g>
+            <!-- agents -->
+            <g class="node ai" data-step="4" data-score="7">
+              <rect class="n-box" x="592" y="48" width="200" height="36" rx="8"/>
+              <text class="n-t" x="604" y="71">header-analyst</text>
+              <rect class="n-scorebg" x="758" y="55" width="26" height="22" rx="5"/><text class="n-score" x="771" y="71" text-anchor="middle">–</text>
+            </g>
+            <g class="node ai" data-step="4" data-score="9">
+              <rect class="n-box" x="592" y="102" width="200" height="36" rx="8"/>
+              <text class="n-t" x="604" y="125">url reputation</text>
+              <rect class="n-scorebg" x="758" y="109" width="26" height="22" rx="5"/><text class="n-score" x="771" y="125" text-anchor="middle">–</text>
+            </g>
+            <g class="node ai" data-step="4" data-score="6">
+              <rect class="n-box" x="592" y="156" width="200" height="36" rx="8"/>
+              <text class="n-t" x="604" y="179">attachment-static</text>
+              <rect class="n-scorebg" x="758" y="163" width="26" height="22" rx="5"/><text class="n-score" x="771" y="179" text-anchor="middle">–</text>
+            </g>
+            <g class="node ai" data-step="4" data-score="5">
+              <rect class="n-box" x="592" y="210" width="200" height="36" rx="8"/>
+              <text class="n-t" x="604" y="233">detonation-isolated</text>
+              <rect class="n-scorebg" x="758" y="217" width="26" height="22" rx="5"/><text class="n-score" x="771" y="233" text-anchor="middle">–</text>
+            </g>
+            <g class="node ai" data-step="4" data-score="8">
+              <rect class="n-box" x="592" y="264" width="200" height="36" rx="8"/>
+              <text class="n-t" x="604" y="287">detonation-monitored</text>
+              <rect class="n-scorebg" x="758" y="271" width="26" height="22" rx="5"/><text class="n-score" x="771" y="287" text-anchor="middle">–</text>
+            </g>
+            <g class="node ai" data-step="4" data-score="7">
+              <rect class="n-box" x="592" y="318" width="200" height="36" rx="8"/>
+              <text class="n-t" x="604" y="341">social-engineering</text>
+              <rect class="n-scorebg" x="758" y="325" width="26" height="22" rx="5"/><text class="n-score" x="771" y="341" text-anchor="middle">–</text>
+            </g>
+            <!-- synth -->
+            <g class="node" data-step="5">
+              <rect class="n-box" x="820" y="152" width="170" height="80" rx="10"/>
+              <text class="n-t" x="905" y="182" text-anchor="middle">synthesize.py</text>
+              <text class="n-s" x="905" y="201" text-anchor="middle">severity = max(scores)</text>
+              <text class="n-s" x="905" y="217" text-anchor="middle">writes report + DB row</text>
+            </g>
+            <!-- verdict -->
+            <g class="node verdict" data-step="6">
+              <rect class="n-box" x="820" y="264" width="170" height="70" rx="10"/>
+              <text class="n-t" x="905" y="294" text-anchor="middle" style="font-size:17px">malicious</text>
+              <text class="n-s" x="905" y="316" text-anchor="middle">severity 9 / 10</text>
+            </g>
+          </svg>
+        </div>
+        <div class="console" id="console" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== PIPELINE ===================== -->
+  <section class="block" id="pipeline">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Scripts gather the evidence. Claude reads it.</h2>
+        <p>Anything that must behave the same way every run, like parsing, hashing, VM control, API calls and the database, is a plain Python or PowerShell script with tests. Claude is used only where judgement is needed: reading the evidence and explaining it. The two layers never call each other directly. They meet in one case folder on disk.</p>
+      </div>
+      <div class="panel">
+        <div class="legend">
+          <span><i style="background:var(--ink-2)"></i>Deterministic script</span>
+          <span><i style="background:var(--ai)"></i>Claude (command or subagent)</span>
+          <span><i style="border:1px dashed var(--ink-3)"></i>You</span>
+        </div>
+        <div class="scroll-x">
+          <div class="lanes">
+            <div></div>
+            <div class="col-h"><span class="num">1</span>Intake</div>
+            <div class="col-h"><span class="num">2</span>Detonate</div>
+            <div class="col-h"><span class="num">3</span>Enrich</div>
+            <div class="col-h"><span class="num">4</span>Analyse</div>
+            <div class="col-h"><span class="num">5</span>Synthesise</div>
+            <div class="col-h"><span class="num">6</span>Report</div>
+
+            <div class="lane-h">You<small>trigger and decide</small></div>
+            <div class="cell"><div class="chip you"><b>/phish-scan</b>Paste an email, or drop a <code>.eml</code> in <code>intake/</code></div></div>
+            <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+            <div class="cell"><div class="chip you"><b>you act</b>Block, reset, report. Nothing is done for you.</div></div>
+
+            <div class="lane-h">Claude layer<small>orchestrates and reasons</small></div>
+            <div class="cell"><div class="chip ai"><b>phish-scan.md</b>Writes pasted text to a temp file, never into a shell command</div></div>
+            <div class="cell"><div class="chip ai"><b>orchestrator</b>Starts detonation only if <code>meta.json</code> lists an attachment</div></div>
+            <div class="cell"></div>
+            <div class="cell"><div class="chip ai"><b>6 subagents</b>One Agent call each, all in a single message</div></div>
+            <div class="cell"></div>
+            <div class="cell"><div class="chip ai"><b>chat summary</b>Relays verdict, evidence and the stored action list</div></div>
+
+            <div class="lane-h">Script layer<small>deterministic, tested</small></div>
+            <div class="cell"><div class="chip det"><b>intake_parse.py</b>Parse MIME, sanitise names, SHA-256 attachments</div></div>
+            <div class="cell"><div class="chip det"><b>vm_lifecycle.ps1</b>Clone, detonate, screenshot, destroy, in two parallel jobs</div></div>
+            <div class="cell"><div class="chip det"><b>enrich_case.py</b>Extract URLs and IPs, query three reputation APIs</div></div>
+            <div class="cell"></div>
+            <div class="cell"><div class="chip det"><b>synthesize.py</b>Max score, verdict, <code>report.md</code>, <code>findings.json</code></div></div>
+            <div class="cell"><div class="chip det"><b>db.py</b>One row per case in <code>cases.sqlite</code></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SANDBOX ===================== -->
+  <section class="block" id="sandbox">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Same sample, two network postures, at the same time.</h2>
+        <p>Every attachment runs in two fresh clones of a read-only golden Windows 11 snapshot. One has no network at all, which shows baseline behaviour with no risk of a callback. The other can reach the internet through its own NAT network, which exposes the C2 beacons and second-stage downloads that network-aware malware hides when it's offline.</p>
+      </div>
+
+      <div class="two">
+        <div class="panel">
+          <h3 style="margin-bottom:14px">Containment</h3>
+          <div class="scroll-x">
+            <svg class="net" viewBox="0 0 900 430" role="img" aria-label="Network containment diagram. Inside the Windows host, VBoxManage controls both sandboxes over the hypervisor channel. The isolated sandbox has no network adapter and no route anywhere. The monitored sandbox reaches the internet only through the PhishRangeMonitoredNet NAT network, which is never bridged to the home LAN.">
+              <defs>
+                <marker id="ahm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10z"/></marker>
+                <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah2" d="M0,0 L10,5 L0,10z"/></marker>
+              </defs>
+              <rect class="host" x="14" y="14" width="610" height="400" rx="16"/>
+              <text class="n-t" x="34" y="42">Windows 11 host with VirtualBox 7.2</text>
+
+              <rect class="plain" x="224" y="66" width="190" height="58" rx="10"/>
+              <text class="n-t" x="319" y="91" text-anchor="middle">VBoxManage</text>
+              <text class="n-s" x="319" y="109" text-anchor="middle">vm_lifecycle.ps1</text>
+
+              <path class="gc" d="M280,124 C280,170 160,170 160,222" marker-end="url(#ahg)"/>
+              <path class="gc" d="M358,124 C358,170 478,170 478,222" marker-end="url(#ahg)"/>
+              <text class="n-lbl" x="424" y="88">guestcontrol: copy + launch,</text>
+              <text class="n-lbl" x="424" y="104">over the hypervisor,</text>
+              <text class="n-lbl" x="424" y="120">not the network</text>
+
+              <rect class="vm-iso" x="44" y="224" width="236" height="120" rx="12"/>
+              <text class="n-t" x="162" y="254" text-anchor="middle">Isolated clone</text>
+              <text class="n-s" x="162" y="276" text-anchor="middle">--nic1 null</text>
+              <text class="n-s" x="162" y="294" text-anchor="middle">no gateway, no DNS</text>
+              <text class="n-s" x="162" y="312" text-anchor="middle">no route, even to the host</text>
+              <path class="x" d="M150,364 l16,16 M166,364 l-16,16"/>
+              <text class="bad-t" x="162" y="400" text-anchor="middle">nothing gets out</text>
+
+              <rect class="vm-mon" x="362" y="224" width="236" height="120" rx="12"/>
+              <text class="n-t" x="480" y="254" text-anchor="middle">Monitored clone</text>
+              <text class="n-s" x="480" y="276" text-anchor="middle">--nic1 natnetwork</text>
+              <text class="n-s" x="480" y="294" text-anchor="middle">outbound only</text>
+              <text class="n-s" x="480" y="312" text-anchor="middle">diffed against isolated run</text>
+
+              <path class="egress" d="M598,284 L660,284" marker-end="url(#ahm)"/>
+              <rect class="plain" x="664" y="250" width="222" height="68" rx="10" style="stroke:var(--mon)"/>
+              <text class="n-t" x="775" y="278" text-anchor="middle">PhishRangeMonitoredNet</text>
+              <text class="n-s" x="775" y="298" text-anchor="middle">dedicated NAT network</text>
+
+              <path class="egress" d="M775,250 L775,134" marker-end="url(#ahm)"/>
+              <rect class="plain" x="700" y="72" width="150" height="58" rx="29"/>
+              <text class="n-t" x="775" y="106" text-anchor="middle">Internet</text>
+              <text class="n-lbl" x="786" y="196">C2, redirects,</text>
+              <text class="n-lbl" x="786" y="210">second stages</text>
+
+              <path class="blocked" d="M775,318 L775,356"/>
+              <path class="x" d="M767,329 l16,16 M783,329 l-16,16"/>
+              <rect class="plain" x="690" y="358" width="170" height="52" rx="10"/>
+              <text class="n-t" x="775" y="382" text-anchor="middle">Home LAN</text>
+              <text class="bad-t" x="775" y="400" text-anchor="middle">never bridged</text>
+            </svg>
+          </div>
+        </div>
+
+        <div>
+          <div class="profile iso">
+            <h3><i></i>Isolated profile</h3>
+            <dl>
+              <dt>Network</dt><dd>Adapter disconnected</dd>
+              <dt>Shows</dt><dd>What the sample does with zero network: dropped files, spawned processes, fake error dialogs</dd>
+              <dt>Risk</dt><dd>No callback or spread is possible</dd>
+            </dl>
+          </div>
+          <div class="profile mon">
+            <h3><i></i>Monitored profile</h3>
+            <dl>
+              <dt>Network</dt><dd>Own NAT segment, outbound only</dd>
+              <dt>Shows</dt><dd>Anything that only happens once the sample can phone home</dd>
+              <dt>Risk</dt><dd>Contained by the NAT segment, a fixed timeout and a forced power-off</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:20px">
+        <h3>Life of a detonation clone</h3>
+        <p class="caption" style="margin:6px 0 20px">Both clones run as PowerShell background jobs over the same timeline. Times are the worst-case budgets in <code>vm_lifecycle.ps1</code>; a healthy host is usually ready well before the boot limit.</p>
+        <div class="scroll-x">
+          <div class="tl">
+            <div class="tl-row iso-row">
+              <div class="who"><i style="background:var(--iso)"></i>Isolated</div>
+              <div class="tl-track">
+                <div class="seg clone" style="left:0;width:2.7%" title="Clone from golden-clean"></div>
+                <div class="seg boot" style="left:2.7%;width:40%">boot, wait for guest control</div>
+                <div class="seg run" style="left:42.7%;width:40%">observe 300 s
+                  <div class="ticks"></div>
+                </div>
+                <div class="seg end" style="left:82.7%;width:4.5%" title="tasklist, status.json, power off, delete"></div>
+                <div class="ceiling" style="left:100%"></div>
+              </div>
+            </div>
+            <div class="tl-row mon-row">
+              <div class="who"><i style="background:var(--mon)"></i>Monitored</div>
+              <div class="tl-track">
+                <div class="seg clone" style="left:0;width:2.7%" title="Clone from golden-clean"></div>
+                <div class="seg boot" style="left:2.7%;width:40%">boot, wait for guest control</div>
+                <div class="seg run" style="left:42.7%;width:40%">observe 300 s
+                  <div class="ticks"></div>
+                </div>
+                <div class="seg end" style="left:82.7%;width:4.5%" title="tasklist, status.json, power off, delete"></div>
+                <div class="ceiling" style="left:100%"></div>
+              </div>
+            </div>
+            <div class="tl-axis">
+              <div></div>
+              <div class="scale">
+                <span style="left:0">0 s</span><span style="left:20%">150</span><span style="left:40%">300</span><span style="left:60%">450</span><span style="left:80%">600</span><span style="left:96%">750 s</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="tl-notes">
+          <div><b>Clone</b><code>clonevm</code> from the <code>golden-clean</code> snapshot. Orphans from a crashed run are deleted first.</div>
+          <div><b>Boot, up to 300 s</b>Polls <code>whoami</code> through guest control every 10 s, up to 30 tries.</div>
+          <div><b>Observe, 300 s</b>Launches with <code>cmd /c start</code>, like a double-click, then takes a screenshot every 20 s (15 ticks).</div>
+          <div><b>Collect and destroy</b><code>tasklist</code> to <code>process_log.json</code>, write <code>status.json</code>, then power off and <code>unregistervm --delete</code> in a <code>finally</code> block.</div>
+          <div><b style="color:var(--bad)">Hard ceiling, 750 s</b>The orchestrator's <code>Wait-Job</code> limit. A clone that overruns is killed and cleaned up anyway.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== AGENTS ===================== -->
+  <section class="block" id="agents">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Six analysts, each with one job.</h2>
+        <p>Each agent reads only its slice of the case folder and writes one findings file shaped as <code>{"risk_score": 0-10, "summary", "details"}</code>. All six treat every header, filename, body and screenshot as attacker-controlled data. A prompt-injection attempt hidden in a sample is recorded as a finding, not obeyed.</p>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--ai)"></i>Content and context</span>
+        <span><i style="background:var(--iso)"></i>Isolated detonation</span>
+        <span><i style="background:var(--mon)"></i>Monitored detonation</span>
+      </div>
+      <div class="agents">
+        <article class="agent content">
+          <h3>header-analyst</h3>
+          <p>Checks SPF, DKIM and DMARC, walks the Received chain, and flags lookalike domains and From/Reply-To mismatches.</p>
+          <div class="io"><span>reads</span><span><code>raw.eml</code> headers</span><span>writes</span><span><code>header.json</code></span></div>
+        </article>
+        <article class="agent content">
+          <h3>url reputation</h3>
+          <p>Interprets VirusTotal, urlscan.io and AbuseIPDB results for every link, IP and hash, including redirect chains and credential-harvest pages.</p>
+          <div class="io"><span>reads</span><span><code>enrichment/*.json</code></span><span>writes</span><span><code>url.json</code></span></div>
+          <span class="note">Handled by the <code>url-analyst</code> subagent.</span>
+        </article>
+        <article class="agent content">
+          <h3>attachment-static-analyst</h3>
+          <p>Looks at the file without running it: magic bytes against the extension, macros and scripts, embedded IOCs.</p>
+          <div class="io"><span>reads</span><span><code>attachments/</code>, hashes</span><span>writes</span><span><code>attachment_static.json</code></span></div>
+        </article>
+        <article class="agent content">
+          <h3>social-engineering-analyst</h3>
+          <p>Explains the pretext in plain English: who is being impersonated, what urgency is used, and what the attacker wants you to do.</p>
+          <div class="io"><span>reads</span><span>email body</span><span>writes</span><span><code>social_engineering.json</code></span></div>
+        </article>
+        <article class="agent det-iso">
+          <h3>detonation-isolated-analyst</h3>
+          <p>Describes what the sample did with no network available, and says clearly when a detonation failed rather than came back clean.</p>
+          <div class="io"><span>reads</span><span>isolated screenshots, process log, status</span><span>writes</span><span><code>detonation_isolated.json</code></span></div>
+        </article>
+        <article class="agent det-mon">
+          <h3>detonation-monitored-analyst</h3>
+          <p>Diffs the monitored run against the isolated one to surface anything that only happened once the sample could reach the internet.</p>
+          <div class="io"><span>reads</span><span>monitored screenshots, process log, status</span><span>writes</span><span><code>detonation_monitored.json</code></span></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SCORING ===================== -->
+  <section class="block" id="scoring">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>The worst finding sets the verdict.</h2>
+        <p><code>synthesize.py</code> doesn't average. Severity is the highest score any single agent gave, so one strong signal, like a known-bad hash, can't be diluted by five quiet ones. A missing or malformed findings file counts as 0 and is noted in the report. Move the sliders to see how it plays out.</p>
+      </div>
+      <div class="panel calc">
+        <div id="sliders"></div>
+        <div>
+          <div class="sev-num"><b id="sev">9</b><span class="of">/ 10 severity</span><span class="verdict-tag" id="verdict">malicious</span></div>
+          <div class="scale-bar" aria-hidden="true">
+            <div class="bands"><span></span><span></span><span></span><span></span></div>
+            <div class="marker" id="marker"></div>
+          </div>
+          <div class="scale-labels">
+            <span><b>0–1</b>benign</span>
+            <span><b>2–4</b>likely benign, flagged</span>
+            <span><b>5–7</b>suspicious</span>
+            <span><b>8–10</b>malicious</span>
+          </div>
+          <h3 class="actions-h">Recommended actions saved with the case</h3>
+          <ul class="actions" id="actions"></ul>
+          <p class="note" style="margin-top:12px">These come from a fixed list per verdict and are stored in <code>findings.json</code>. Claude relays them; it doesn't invent or run them.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== OUTPUT ===================== -->
+  <section class="block" id="output">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Every case leaves a complete paper trail.</h2>
+        <p>Each run creates <code>cases/&lt;case_id&gt;/</code>, with IDs like <code>20260920-212710-ee1105</code>. This map shows which step writes each file and who reads it next, which is how the pipeline hands work along without any component calling another.</p>
+      </div>
+      <div class="panel scroll-x" style="padding-top:18px">
+        <table class="fmap">
+          <thead><tr><th>File</th><th>Written by</th><th>Read by</th></tr></thead>
+          <tbody>
+            <tr class="group"><td colspan="3">Input</td></tr>
+            <tr><td>raw.eml <span class="ind">or</span> raw.txt</td><td><span class="tag s">intake_parse.py</span></td><td><span class="tag a">header</span><span class="tag a">social-engineering</span><span class="tag s">enrich_case.py</span></td></tr>
+            <tr><td>meta.json</td><td><span class="tag s">intake_parse.py</span></td><td><span class="tag a">orchestrator</span><span class="tag a">attachment-static</span></td></tr>
+            <tr><td>attachments/&lt;file&gt;</td><td><span class="tag s">intake_parse.py</span></td><td><span class="tag s">vm_lifecycle.ps1</span><span class="tag a">attachment-static</span></td></tr>
+            <tr class="group"><td colspan="3">Detonation, once per profile</td></tr>
+            <tr><td>detonation/isolated/screenshots/*.png</td><td><span class="tag i">isolated clone</span></td><td><span class="tag i">detonation-isolated</span><span class="tag m">detonation-monitored</span></td></tr>
+            <tr><td>detonation/isolated/process_log.json</td><td><span class="tag i">isolated clone</span></td><td><span class="tag i">detonation-isolated</span><span class="tag m">detonation-monitored</span></td></tr>
+            <tr><td>detonation/monitored/…</td><td><span class="tag m">monitored clone</span></td><td><span class="tag m">detonation-monitored</span></td></tr>
+            <tr><td>detonation/*/status.json</td><td><span class="tag s">vm_lifecycle.ps1</span></td><td><span class="tag a">both detonation agents</span><span class="tag a">orchestrator</span></td></tr>
+            <tr class="group"><td colspan="3">Enrichment</td></tr>
+            <tr><td>enrichment/urls.json, ips.json</td><td><span class="tag s">enrich_case.py</span></td><td><span class="tag a">url reputation</span></td></tr>
+            <tr><td>enrichment/attachments_vt.json</td><td><span class="tag s">enrich_case.py</span></td><td><span class="tag a">url reputation</span><span class="tag a">attachment-static</span></td></tr>
+            <tr class="group"><td colspan="3">Results</td></tr>
+            <tr><td>agent-findings/*.json</td><td><span class="tag a">six agents</span></td><td><span class="tag s">synthesize.py</span></td></tr>
+            <tr><td>report.md</td><td><span class="tag s">synthesize.py</span></td><td><span class="tag a">chat summary</span><span class="tag y">you</span></td></tr>
+            <tr><td>findings.json</td><td><span class="tag s">synthesize.py</span></td><td><span class="tag a">chat summary</span><span class="tag y">other tools</span></td></tr>
+            <tr><td>db/cases.sqlite <span class="ind">(shared)</span></td><td><span class="tag s">db.py</span></td><td><span class="tag y">you, across cases</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SETUP ===================== -->
+  <section class="block" id="setup">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Set up once, then scan in one command.</h2>
+        <p>The golden VM is the only slow part, about 20 to 40 minutes of unattended install, and you only do it once. Every case after that clones from the snapshot.</p>
+      </div>
+      <div class="setup">
+        <div class="panel">
+          <h3 style="margin-bottom:16px">You'll need</h3>
+          <ul class="prereq">
+            <li><svg viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M8 13.6L4.4 10l-1.4 1.4L8 16.4l9-9L15.6 6z"/></svg><div>Windows 11 with VirtualBox 7.2<small>Built against the 7.2 CLI; see <code>vm-setup/README.md</code> before using older guides.</small></div></li>
+            <li><svg viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M8 13.6L4.4 10l-1.4 1.4L8 16.4l9-9L15.6 6z"/></svg><div>A Windows evaluation ISO<small>Plus the free ADK Deployment Tools (<code>oscdimg.exe</code>) to bake in the answer file.</small></div></li>
+            <li><svg viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M8 13.6L4.4 10l-1.4 1.4L8 16.4l9-9L15.6 6z"/></svg><div>Python 3.11 or newer<small><code>requests</code>, <code>python-dotenv</code>, <code>pytest</code></small></div></li>
+            <li><svg viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M8 13.6L4.4 10l-1.4 1.4L8 16.4l9-9L15.6 6z"/></svg><div>Claude Code<small>The pipeline runs through <code>/phish-scan</code> and its subagents.</small></div></li>
+            <li class="opt"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="2"/></svg><div>Free API keys, optional<small>VirusTotal, urlscan.io, AbuseIPDB. A missing key, rate limit or network error returns an "unavailable" result instead of failing the case.</small></div></li>
+          </ul>
+        </div>
+        <ol class="steps">
+          <li>
+            <h3>Build the golden VM</h3>
+            <p>Fill in <code>autounattend.xml</code> from the template with your ISO's edition name and a throwaway password, then run the two build scripts. The result is <code>PhishRange-Golden</code> with a <code>golden-clean</code> snapshot.</p>
+            <pre class="code"><code>.\vm-setup\vm_build.ps1
+.\vm-setup\vm_build_finalize.ps1</code><button class="copy" type="button">Copy</button></pre>
+          </li>
+          <li>
+            <h3>Install Python dependencies</h3>
+            <pre class="code"><code>pip install -r requirements.txt</code><button class="copy" type="button">Copy</button></pre>
+          </li>
+          <li>
+            <h3>Add API keys, if you have them</h3>
+            <p>Fill in any of <code>VT_API_KEY</code>, <code>URLSCAN_API_KEY</code> and <code>ABUSEIPDB_API_KEY</code>. Leave any blank to skip that source. <code>.env</code> is git-ignored.</p>
+            <pre class="code"><code>Copy-Item .env.example .env</code><button class="copy" type="button">Copy</button></pre>
+          </li>
+          <li>
+            <h3>Run a case in Claude Code</h3>
+            <p>Drop a <code>.eml</code> into <code>intake/</code> and run the command with no arguments, or paste the email after it. Cases with an attachment take several minutes while both sandboxes run.</p>
+            <pre class="code"><code>/phish-scan</code><button class="copy" type="button">Copy</button></pre>
+          </li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== TESTS ===================== -->
+  <section class="block" id="tests">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>52 tests, and none of them touch the network.</h2>
+        <p><code>conftest.py</code> forces all three API keys to <code>None</code> for every test, so the no-key paths are always exercised and no test makes a live call, whatever is in your <code>.env</code>. The VM scripts are checked by hand against real VirtualBox, and the smoke test is a full run against <code>tests/fixtures/benign-test-phish.eml</code>.</p>
+      </div>
+      <div class="panel">
+        <div class="bars" id="bars"></div>
+        <pre class="code" style="margin-top:20px;max-width:360px"><code>pytest</code><button class="copy" type="button">Copy</button></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== LIMITATIONS ===================== -->
+  <section class="block" id="limits">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>What it doesn't do yet.</h2>
+        <p>These are deliberate scoping decisions for this version, recorded in full in <a href="https://github.com/IT101MK/Project-PhishRange/blob/master/docs/superpowers/specs/2026-09-19-phishrange-design.md">section 9 of the design spec</a>.</p>
+      </div>
+      <div class="limits">
+        <div class="limit"><span class="kind">Known gap</span><h3>Samples launch outside the desktop session</h3><p><code>guestcontrol start</code> runs the sample in the non-interactive Services session, confirmed with <code>tasklist</code>. Screenshots show the idle desktop rather than the sample's window, and malware that checks for this may behave differently. A fix using a logged-on-only Scheduled Task has been identified but not built.</p></div>
+        <div class="limit"><span class="kind">Known gap</span><h3>No packet capture yet</h3><p>The monitored profile has a placeholder capture job, but no <code>capture.pcap</code> is written. Network behaviour is read from screenshots and process logs.</p></div>
+        <div class="limit"><span class="kind">Known gap</span><h3>No egress kill switch</h3><p>Nothing cuts the monitored clone's network mid-run. Containment relies on the dedicated NAT segment, the fixed timeout and a forced power-off.</p></div>
+        <div class="limit"><span class="kind">Known gap</span><h3>No cross-case IOC table</h3><p>The database has one row per case. Asking "have I seen this domain before?" means searching each case's JSON files.</p></div>
+        <div class="limit"><span class="kind design">Future work</span><h3>No watcher, Proxmox backend or SIEM feed</h3><p>Intake is read only when you run the command. The VM layer sits behind three functions so a Proxmox provider could slot in later. There's no CEF or syslog output.</p></div>
+        <div class="limit"><span class="kind design">By design</span><h3>Nothing runs on its own</h3><p>No sender is blocked and no hash is submitted automatically. Every recommended action is yours to review and carry out.</p></div>
+      </div>
+
+      <h3 style="margin:48px 0 18px;font-size:22px">Safety built in</h3>
+      <div class="safety">
+        <div><b>Nothing to reuse</b><p>Both clones are destroyed after every run, so there's never a dirty VM to open by accident.</p></div>
+        <div><b>No path to your LAN</b><p>The isolated clone has no network at all. The monitored clone's NAT network is never bridged to the home LAN.</p></div>
+        <div><b>Content is data, not commands</b><p>Pasted email text is written with a file tool, never interpolated into a shell, and agents record injection attempts as findings.</p></div>
+        <div><b>Secrets stay local</b><p>API keys live in a git-ignored <code>.env</code>. The VM password and filled-in answer file are ignored too.</p></div>
+      </div>
+
+      <h3 style="margin:48px 0 18px;font-size:22px">Read more</h3>
+      <div class="docs">
+        <a href="https://github.com/IT101MK/Project-PhishRange/blob/master/docs/superpowers/specs/2026-09-19-phishrange-design.md"><b>Design spec</b><span>Purpose, architecture, agent roles, error handling and deferred work.</span><code>docs/superpowers/specs/</code></a>
+        <a href="https://github.com/IT101MK/Project-PhishRange/blob/master/docs/superpowers/plans/2026-09-19-phishrange-implementation.md"><b>Implementation plan</b><span>The 12-task build plan, step by step.</span><code>docs/superpowers/plans/</code></a>
+        <a href="https://github.com/IT101MK/Project-PhishRange/blob/master/vm-setup/README.md"><b>Golden VM guide</b><span>Build steps and the VirtualBox 7.2 quirks found along the way.</span><code>vm-setup/README.md</code></a>
+        <a href="https://github.com/IT101MK/Project-PhishRange/blob/master/.claude/commands/phish-scan.md"><b>The orchestrator</b><span>The exact steps <code style="margin:0;color:inherit">/phish-scan</code> runs on each case.</span><code>.claude/commands/phish-scan.md</code></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>PhishRange: local phishing and malware triage for Claude Code.</span>
+    <a href="https://github.com/IT101MK/Project-PhishRange">github.com/IT101MK/Project-PhishRange</a>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- hero replay ---------- */
+  var svg = document.querySelector('svg.pipe');
+  var consoleEl = document.getElementById('console');
+  var nodes = svg.querySelectorAll('.node');
+  var edges = svg.querySelectorAll('.n-edge');
+  var agents = svg.querySelectorAll('.node.ai');
+  var log = [
+    ['/phish-scan', 'Paste received. Written to a temp file, never to a shell.'],
+    ['intake_parse.py', 'Case 20260929-101512-a3f0c1 created. 1 attachment, sha256 9f2c…e41b.'],
+    ['vm_lifecycle.ps1', 'Cloned golden-clean twice. Isolated and monitored detonations running in parallel. enrich_case.py querying 3 URLs, 2 IPs, 1 hash.'],
+    ['case folder', '15 screenshots per profile, process logs, status.json: completed. Enrichment written.'],
+    ['6 agents', 'Dispatched together. Each writes agent-findings/<name>.json.'],
+    ['synthesize.py', 'Scores 7, 9, 6, 5, 8, 7. Severity = max = 9.'],
+    ['verdict', 'malicious, 9/10. report.md, findings.json and a cases.sqlite row written. 5 recommended actions.']
+  ];
+  var timers = [];
+
+  function clear() {
+    timers.forEach(clearTimeout); timers = [];
+    nodes.forEach(function (n) { n.classList.remove('lit'); });
+    edges.forEach(function (e) { e.classList.remove('lit'); });
+    agents.forEach(function (a) { a.querySelector('.n-score').textContent = '–'; });
+    consoleEl.innerHTML = '';
+  }
+  function line(i) {
+    var s = document.createElement('span');
+    s.className = 'ln';
+    s.innerHTML = '<span class="p">' + log[i][0] + ' › </span>';
+    s.appendChild(document.createTextNode(log[i][1]));
+    consoleEl.appendChild(s);
+    while (consoleEl.children.length > 4) consoleEl.removeChild(consoleEl.firstChild);
+    Array.prototype.forEach.call(consoleEl.children, function (c, k, all) { c.classList.toggle('dim', k < all.length - 1); });
+  }
+  function light(step) {
+    nodes.forEach(function (n) { if (+n.dataset.step === step && !n.classList.contains('ai')) n.classList.add('lit'); });
+    edges.forEach(function (e) { if (+e.dataset.step === step) e.classList.add('lit'); });
+    if (step === 4) {
+      agents.forEach(function (a, k) {
+        var go = function () { a.classList.add('lit'); a.querySelector('.n-score').textContent = a.dataset.score; };
+        reduce ? go() : timers.push(setTimeout(go, 180 * k));
+      });
+    }
+    line(step);
+  }
+  function play() {
+    clear();
+    if (reduce) { for (var i = 0; i < 7; i++) light(i); return; }
+    var at = [0, 900, 1900, 3300, 4300, 5900, 6900];
+    at.forEach(function (t, i) { timers.push(setTimeout(function () { light(i); }, t)); });
+  }
+  document.getElementById('replay-btn').addEventListener('click', play);
+  if ('IntersectionObserver' in window && !reduce) {
+    var started = false;
+    new IntersectionObserver(function (es, obs) {
+      if (es[0].isIntersecting && !started) { started = true; play(); obs.disconnect(); }
+    }, { threshold: 0.35 }).observe(svg);
+  } else { play(); }
+
+  /* ---------- timeline ticks: 15 screenshots across the observe bar ---------- */
+  document.querySelectorAll('.ticks').forEach(function (t) {
+    for (var k = 1; k <= 15; k++) {
+      var s = document.createElement('span');
+      s.style.left = 'calc(' + (k / 15 * 100) + '% - 2px)';
+      t.appendChild(s);
+    }
+  });
+
+  /* ---------- severity calculator (mirrors scripts/synthesize.py) ---------- */
+  var agentNames = [
+    ['header', 7], ['url', 9], ['attachment_static', 6],
+    ['detonation_isolated', 5], ['detonation_monitored', 8], ['social_engineering', 7]
+  ];
+  var ACTIONS = {
+    malicious: [
+      'Do not open the attachment or click any link in this message; delete it from the mailbox.',
+      'Block the sender domain and any URLs/IPs listed in this case at your mail filter or DNS/firewall.',
+      'Add the attachment hash(es) from meta.json to your endpoint blocklist, if present.',
+      'If anyone already interacted with this message, treat their credentials as exposed: reset passwords and review account activity.',
+      'Report the sample and its IOCs to your threat intel source or mail provider’s abuse channel.'
+    ],
+    suspicious: [
+      'Treat the message as unsafe until confirmed: do not open attachments or links.',
+      'Verify the sender through a known-good channel (a phone number or address you already had, not one from this email).',
+      'Consider blocking the sender domain and the URLs/IPs listed in this case while you verify.',
+      'Keep the case artifacts; re-check the URLs/hashes against reputation sources in a few days, as new samples are often unknown at first sight.'
+    ],
+    likely_benign_but_flagged: [
+      'No blocking action required, but confirm the sender is who they claim before acting on anything the message asks for.',
+      'Keep the case on file in case similar messages arrive from the same sender or domain.'
+    ],
+    benign: [
+      'No action required - nothing in this case indicates a threat.',
+      'Keep the case on file for future comparison if similar messages arrive.'
+    ]
+  };
+  var CLS = { malicious: 'v-malicious', suspicious: 'v-suspicious', likely_benign_but_flagged: 'v-flagged', benign: 'v-benign' };
+  function verdictFor(s) { return s >= 8 ? 'malicious' : s >= 5 ? 'suspicious' : s >= 2 ? 'likely_benign_but_flagged' : 'benign'; }
+
+  var wrap = document.getElementById('sliders');
+  var inputs = [];
+  agentNames.forEach(function (a) {
+    var id = 'sl-' + a[0];
+    var row = document.createElement('div');
+    row.className = 'slider';
+    row.innerHTML = '<label for="' + id + '"><span>' + a[0] + '.json</span><span class="is-max">sets severity</span></label>' +
+      '<input type="range" min="0" max="10" step="1" id="' + id + '" value="' + a[1] + '"><output for="' + id + '">' + a[1] + '</output>';
+    wrap.appendChild(row);
+    inputs.push(row);
+  });
+  var lastVerdict = null;
+  function update() {
+    var vals = inputs.map(function (r) { return +r.querySelector('input').value; });
+    var sev = Math.max.apply(null, vals);
+    inputs.forEach(function (r, k) {
+      r.querySelector('output').textContent = vals[k];
+      r.classList.toggle('max', vals[k] === sev && sev > 0);
+    });
+    var v = verdictFor(sev);
+    document.getElementById('sev').textContent = sev;
+    var vt = document.getElementById('verdict');
+    vt.textContent = v;
+    vt.className = 'verdict-tag ' + CLS[v];
+    document.getElementById('marker').style.left = (sev / 11 * 100 + 100 / 22) + '%';
+    if (v !== lastVerdict) {
+      var ul = document.getElementById('actions');
+      ul.innerHTML = '';
+      ACTIONS[v].forEach(function (t) { var li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+      lastVerdict = v;
+    }
+  }
+  wrap.addEventListener('input', update);
+  update();
+
+  /* ---------- test bars ---------- */
+  var tests = [
+    ['test_intake_parse.py', 13, 'parsing, filename sanitising, malformed input'],
+    ['test_synthesize.py', 9, 'scoring, verdicts, malformed findings, report'],
+    ['test_enrich_vt.py', 8, 'VirusTotal wrapper, mocked HTTP'],
+    ['test_enrich_urlscan.py', 7, 'urlscan.io wrapper, mocked HTTP'],
+    ['test_enrich_abuseipdb.py', 7, 'AbuseIPDB wrapper, mocked HTTP'],
+    ['test_enrich_case.py', 5, 'URL and IP extraction from MIME'],
+    ['test_db.py', 3, 'SQLite persistence']
+  ];
+  var bars = document.getElementById('bars');
+  tests.forEach(function (t) {
+    var d = document.createElement('div');
+    d.className = 'bar';
+    d.innerHTML = '<span class="name">' + t[0] + '</span><span class="track"><span class="fill" style="width:' + (t[1] / 13 * 80) + '%"></span><span class="v">' + t[1] + '</span></span><span class="what">' + t[2] + '</span>';
+    bars.appendChild(d);
+  });
+
+  /* ---------- copy buttons ---------- */
+  document.querySelectorAll('.copy').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var text = b.parentNode.querySelector('code').textContent;
+      try {
+        navigator.clipboard.writeText(text).then(function () {
+          b.textContent = 'Copied';
+          setTimeout(function () { b.textContent = 'Copy'; }, 1400);
+        });
+      } catch (e) { /* clipboard unavailable */ }
+    });
+  });
+
+  /* ---------- nav highlight ---------- */
+  try {
+    var links = {};
+    document.querySelectorAll('#topnav a').forEach(function (a) { links[a.getAttribute('href').slice(1)] = a; });
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) {
+        if (e.isIntersecting) {
+          Object.keys(links).forEach(function (k) { links[k].classList.remove('active'); });
+          if (links[e.target.id]) links[e.target.id].classList.add('active');
+        }
+      });
+    }, { rootMargin: '-30% 0px -60% 0px' });
+    Object.keys(links).forEach(function (id) { var el = document.getElementById(id); if (el) io.observe(el); });
+  } catch (e) { /* highlight is optional */ }
+})();
+</script>
+</body>
+</html>
