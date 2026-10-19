@@ -2,7 +2,7 @@
 
 **PhishRange** is a Claude Code tool that triages suspicious emails and attachments on a single Windows PC. It parses the email, detonates any attachment in two throwaway VirtualBox sandboxes (one isolated, one with monitored egress), runs six analysis agents in parallel, and writes a plain-English verdict with recommended actions. Nothing is actioned automatically.
 
-This repo holds the visual showcase only. The PhishRange source code will be published separately.
+This repo holds the visual showcase only.
 
 > **Interactive version:** download [`index.html`](index.html) and open it in any browser. It includes the animated walkthrough, the severity calculator and copy-to-clipboard setup steps. The screenshots below show every section.
 
