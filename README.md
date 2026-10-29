@@ -51,3 +51,7 @@ Severity is the highest score any single agent gives, not an average, so one str
 ## Limitations and safety
 
 ![Known limitations and safety notes](screenshots/10-limitations-and-safety.png)
+
+## Acknowledgements
+
+The idea for PhishRange came from a friend. The design and build are my own.
